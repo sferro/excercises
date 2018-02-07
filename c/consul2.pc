@@ -1,0 +1,91 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sqlca.h>
+#include <oraca.h>
+
+
+void sql_error();
+
+int main()
+{
+	char username[100];
+	char password[20];
+	char nombre[51], codigo[10], szCLAVE[10];
+	VARCHAR nom[51];
+	
+	strcpy(username, "pais");
+	strcpy(password, "nueva");
+		
+	EXEC SQL WHENEVER SQLERROR do sql_error("ORACLE error--");
+	EXEC SQL CONNECT :username IDENTIFIED BY :password;
+	printf("Conectado a Oracle bajo Username: %s\n", username);
+	
+	EXEC SQL DECLARE p_cursor CURSOR for
+		SELECT clave, descr, descr
+		FROM bs_roa_borrar;
+	
+	EXEC SQL open p_cursor;
+	
+	printf("\n\nLos Estudios Juridcos son.\n");
+	printf("--------------------------\n\n");
+	printf("Codigo\t\t\tNombre de Estudio\n");
+	printf("------\t\t\t-----------------\n");
+
+	while(1) {
+		EXEC SQL FETCH p_cursor INTO :codigo, :nombre, :nom;
+		if (sqlca.sqlcode == 1403) break;
+		printf("%s\t\t%s\t%d\n", codigo, nombre, strlen(nombre));
+		printf("%s\t\t%s\t%d\n", codigo, nom.arr, nom.len);
+
+
+	}
+
+	EXEC SQL close p_cursor;
+	
+	EXEC SQL SELECT CLAVE
+	INTO :szCLAVE
+	FROM BS_ROA_BORRAR
+	WHERE DESCR = 'holas';
+	if(sqlca.sqlcode) {
+	    printf("sqlca.sqlcode(1) = %d\n", sqlca.sqlcode);
+	    printf("sqlca.sqlerrd[2] = %d\n", sqlca.sqlerrd[2]);
+	}
+	else {
+	    printf("sqlca.sqlerrd[2] = %d\n", sqlca.sqlerrd[2]);
+	    printf("szClave = %s\n", szCLAVE);
+	}
+	
+	EXEC SQL WHENEVER SQLERROR CONTINUE;
+	EXEC SQL INSERT INTO BS_ROA_BORRAR
+	(CLAVE, DESCR) 
+	VALUES 
+	('asdfasdfa133', 'PRUE');
+	
+	if(sqlca.sqlcode)
+	    printf("sqlca.sqlcode= %d\n", sqlca.sqlcode);
+	    
+	printf("\nLa consulta fue realizada con Exito\n");
+	
+	EXEC SQL COMMIT WORK RELEASE;
+	
+	exit(0);
+}
+
+void
+sql_error(msg)
+char *msg;
+{
+	char err_msg[512];
+	int buf_len, msg_len;
+	
+	EXEC SQL WHENEVER SQLERROR continue;
+	
+	printf("\n%s\n", msg);
+	
+	buf_len=sizeof(err_msg);
+	sqlglm(err_msg, &buf_len, &msg_len);
+	printf("%.*s\n", msg_len, err_msg);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	exit(1);
+}

@@ -1,0 +1,39 @@
+#include <stdio.h>
+#include <stdlib.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+void sql_error();
+int main()
+{
+	char username[100];
+	char password[20];
+	
+	printf("Username: \n");
+	gets(username);
+	printf("Password \n");
+	gets(password);
+	EXEC SQL WHENEVER SQLERROR do sql_error("ORACLE error--");
+	EXEC SQL CONNECT :username IDENTIFIED BY :password;
+	printf("\Conectado a Oracle bajo: %s\n", username);
+	return 0;
+}
+
+void
+sql_error(msg)
+char *msg;
+{
+	char err_msg[512];
+	int buf_len, msg_len;
+	
+	EXEC SQL WHENEVER SQLERROR continue;
+	
+	printf("\n%s\n", msg);
+	
+	buf_len=sizeof(err_msg);
+	sqlglm(err_msg, &buf_len, &msg_len);
+	printf("%.*s\n", msg_len, err_msg);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	exit(1);
+}

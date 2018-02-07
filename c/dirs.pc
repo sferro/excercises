@@ -1,0 +1,193 @@
+/****************************************************************************
+Nombre del archivo:     dirs.pc
+Autor:
+Seguridad:              Telecom Personal, confidencial
+Descripcion:            El archivo contiene una funcion mediante la cual se 
+						obtienen los directorio de entrada y salida para 
+						cada modulo.
+Inventario de funciones: 
+
+Log de Modificaciones.
+Fecha           Ver.    Quie                     Descripcion
+03/08/2000      1.0     Carolina Del Zotto   Programa Original
+11/10/2000      1.1     Paula Taurozzi       Se agrega efnObtenerTipoReg
+13/10/2000		 1.2		Carolina Del Zotto 	Se agrega efnSqlUpdateProcessRecord
+****************************************************************************/
+#include <dirs.h>
+
+EXEC SQL INCLUDE SQLCA;
+
+int ifnRelacionDirectorios(char *szModulo, char szTipo, char *szDesc,
+										directorio **pLista_Dir)
+{
+
+EXEC SQL BEGIN DECLARE SECTION;
+ varchar vTipo[1],
+         vModulo[FILENAME_MAX],
+         vDirectorio[80],
+		 vDesc[30];
+EXEC SQL END DECLARE SECTION;
+
+int iCod_Ret,
+    iOk_Reg;
+directorio *pDir_Nuevo,
+           *pPio,
+           *pAux;
+
+char szDirectorio[80],
+     szAux_1[1];
+
+MTRLOG_ENTER_FUNCTION(ifnRelacionDirectorios());
+
+iCod_Ret = 0;
+pAux = NULL;
+pPio = NULL;
+pDir_Nuevo = NULL;
+
+sprintf(szAux_1, "%c", szTipo);
+MDBASE_STRCPY_TO_ORA(vTipo, szAux_1);
+MDBASE_STRCPY_TO_ORA(vModulo, szModulo);
+MDBASE_STRCPY_TO_ORA(vDesc, szDesc);
+
+EXEC SQL
+   DECLARE cur_dir CURSOR FOR
+   SELECT dirs_directorio
+   FROM bs_tas_dirs_relacion_proc_dir
+   WHERE dirs_modulo = :vModulo AND
+         dirs_tipo = :vTipo AND
+         dirs_descripcion = :vDesc;
+
+ 
+EXEC SQL OPEN cur_dir;
+
+while(1)
+{
+   EXEC SQL FETCH cur_dir INTO :vDirectorio;
+
+   if(sqlca.sqlcode == MDBASE_ORA_OK)
+   {
+      MDBASE_STRCPY_FROM_ORA(szDirectorio, vDirectorio);
+      iOk_Reg = 1;
+      if((pDir_Nuevo = (directorio *) malloc(sizeof(directorio))) == NULL)
+      {
+         efnMensajeError(MTRLOG_MP_FATAL,
+                        "No hay memoria para crear la lista de Directorios");
+         iCod_Ret = 1;
+         MTRLOG_LEAVE_FUNCTION(iCod_Ret);
+      }
+      if(pAux != NULL)
+         pAux->pSiguiente = pDir_Nuevo;
+      else
+         pPio = pDir_Nuevo;
+
+      pAux = pDir_Nuevo;
+      strncpy(pAux->szDir, szDirectorio, 80);
+      pAux->pSiguiente = NULL;
+   }
+   else
+      if(sqlca.sqlcode == MDBASE_ORA_NOT_FOUND)
+      {
+      	MTRLOG_efnLogMessage(MTRLOG_MP_INFORMATION,
+            "No se encontraron datos");
+			EXEC SQL CLOSE cur_dir;
+         break;
+      }
+      else
+			if(sqlca.sqlcode == MDBASE_ORA_END_FETCH)
+			{
+				EXEC SQL CLOSE cur_dir;
+            break;
+			}
+         else
+      	{
+         	efnMensajeError(MTRLOG_MP_ERROR, MMESSG_ORACLE_ERROR,
+                        __FILE__, __LINE__, sqlca.sqlcode,
+                        sqlca.sqlerrm.sqlerrmc);
+         	MTRLOG_efnLogMessage(MTRLOG_MP_INFORMATION,
+                  "Error al leer la tabla");
+         	iCod_Ret = 1;
+         	EXEC SQL CLOSE cur_dir;
+         	MTRLOG_LEAVE_FUNCTION(iCod_Ret);
+      	}
+
+}
+pAux = pPio;
+*pLista_Dir = pAux;
+
+MTRLOG_LEAVE_FUNCTION(iCod_Ret);
+
+}
+
+MTRLOG_ReturnValue
+efnObtenerTipoReg(int *iRegType, char *szFormato,int iCallType)
+{
+    MTRLOG_ReturnValue eRet;                    /*  Retorno de la funcion   */
+
+    EXEC SQL BEGIN DECLARE SECTION;
+        int     ivCallType,
+                ivRegType;
+        VARCHAR vFormato[FILENAME_MAX];
+    EXEC SQL END DECLARE SECTION;
+
+    ivCallType = iCallType;
+    MDBASE_STRCPY_TO_ORA(vFormato, szFormato);
+
+     EXEC SQL SELECT recs_rec_type
+                INTO :ivRegType
+                FROM bs_tas_recs_relacion_tipo_reg
+               WHERE recs_call_type  = :ivCallType
+                 AND recs_formato    = :vFormato;
+
+    if (sqlca.sqlcode != MDBASE_ORA_OK)
+    {
+		MTRLOG_efnLogMessage(MTRLOG_MP_ERROR,
+            "No se encontro correctamente el recs_rec_type");
+        MTRLOG_ORACLE_ERROR((MTRLOG_MP_ERROR,"Error al leer recs_rec_type"));
+		MTRLOG_LEAVE_FUNCTION(MTRLOG_RV_ERROR);
+	}
+
+	*iRegType = ivRegType;
+
+MTRLOG_LEAVE_FUNCTION(MTRLOG_RV_OK);
+}
+
+MTRLOG_ReturnValue 
+efnSqlUpdateProcessRecord(int iCant_Reg, float fMonto, float fImpuesto,
+											int iProc_Id, int iNum_Sec)
+{
+EXEC SQL BEGIN DECLARE SECTION;
+int iRegistro,
+	 iProcess_Id,
+	 iSeq_Num;
+
+float fRated_Amount,
+		fTax_Amount;
+	  
+EXEC SQL END DECLARE SECTION;
+
+iRegistro = iCant_Reg;
+iProcess_Id = iProc_Id;
+iSeq_Num = iNum_Sec;
+fRated_Amount = fMonto;
+fTax_Amount = fImpuesto;
+
+EXEC SQL 
+	UPDATE prcu_process_record
+		SET prcrec_count = :iRegistro,
+			 rated_amount = DECODE(:fRated_Amount,(0.0),NULL,:fRated_Amount),
+			 tax_amount = DECODE(:fTax_Amount,(0.0),NULL,:fTax_Amount)
+	 WHERE process_id = :iProcess_Id AND
+			 prcrec_id = :iSeq_Num;
+
+if(sqlca.sqlcode != MDBASE_ORA_OK)
+{
+	ifnMsgToLogFile(LOGL_ERROR, DESTINO,		
+			"Error al realizar la actualizacion en la tabla PRCU_PROCESS_RECORD");
+	ifnMsgToLogFile(LOGL_ERROR, DESTINO, MSG_ORA_ERROR, __FILE__,
+                  __LINE__, sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc);
+         MTRLOG_LEAVE_FUNCTION(MTRLOG_RV_ERROR);
+}
+
+MTRLOG_LEAVE_FUNCTION(MTRLOG_RV_OK);
+
+}

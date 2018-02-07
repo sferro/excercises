@@ -1,0 +1,65 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sqlca.h>
+#include <oraca.h>
+
+
+void sql_error();
+
+int main()
+{
+	char username[100];
+	char password[20];
+	char nombre[61], codigo[11];
+	
+	strcpy(username, "pais");
+	strcpy(password, "nueva");
+		
+	EXEC SQL WHENEVER SQLERROR do sql_error("ORACLE error--");
+	EXEC SQL CONNECT :username IDENTIFIED BY :password;
+	printf("\Conectado a Oracle bajo Username: %s\n", username);
+	
+	EXEC SQL DECLARE p_cursor CURSOR for
+		SELECT estu_cod_estudio,estu_nombre_estudio
+		FROM bs_abo_estu_estudios
+		ORDER BY estu_cod_estudio;
+	
+	EXEC SQL open p_cursor;
+	
+	printf("\n\nLos Estudios Juridcos son.\n");
+	printf("--------------------------\n\n");
+	printf("Codigo\t\t\tNombre de Estudio\n");
+	printf("------\t\t\t-----------------\n");
+	EXEC SQL WHENEVER NOT FOUND do break;
+	while(1) {
+		EXEC SQL FETCH p_cursor INTO :codigo, :nombre;
+		printf("%s\t\t%s\n", codigo, nombre);
+	}
+	
+	EXEC SQL close p_cursor;
+	
+	printf("\nLa consulta fue realizada con Exito\n");
+	
+	EXEC SQL COMMIT WORK RELEASE;
+	
+	exit(0);
+}
+
+void
+sql_error(msg)
+char *msg;
+{
+	char err_msg[512];
+	int buf_len, msg_len;
+	
+	EXEC SQL WHENEVER SQLERROR continue;
+	
+	printf("\n%s\n", msg);
+	
+	buf_len=sizeof(err_msg);
+	sqlglm(err_msg, &buf_len, &msg_len);
+	printf("%.*s\n", msg_len, err_msg);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	exit(1);
+}

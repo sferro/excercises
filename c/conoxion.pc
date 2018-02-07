@@ -1,0 +1,24 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sqlca.h>
+#include <oraca.h>
+
+//EXEC SQL INCLUDE SQLCA;
+
+int main(void)
+{
+	char username[100];
+	char password[20];
+	
+	printf("Username: \n");
+	gets(username);
+	printf("Password \n");
+	gets(password);
+	
+	EXEC SQL CONNECT :username IDENTIFIED BY :password;
+	if(sqlca.code=MDBASE.ORACA.OK)
+		printf("Conectado correctamente a la base \n");
+	else
+		printf("ERROR al Conectar con la base");
+	return 0;
+}

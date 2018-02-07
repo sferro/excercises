@@ -1,0 +1,112 @@
+/* Prueba de Pro *C*/
+#include <stdio.h>
+#include <stdlib.h>
+#include <sqlca.h>
+#include <oraca.h>
+
+/*
+EXEC SQL INCLUDE SQLCA;
+EXEC SQL INCLUDE ORACA;
+*/
+
+void sql_error();
+
+struct es{
+	char codigo[20];
+	char nombre[40];
+};
+
+int main()
+{
+	char username[100];
+	char password[20];
+	struct es estudios[10];
+	int n;
+	register int i;
+	
+	n=0;
+/*	struct abo_estu_estudios estudios;*/
+	
+	/* Coloco memoria a la estrcututa estudios*/
+/*	if((estudios=(struct abo_estu_estudios *) malloc(sizeof(struct abo_estu_estudios)))== 0) {
+		fprintf(stderr, "Error de Memoria.\n");
+	}*/
+	
+	printf("Username: \n");
+	gets(username);
+	printf("Password \n");
+	gets(password);
+	EXEC SQL WHENEVER SQLERROR do sql_error("ORACLE error--");
+	EXEC SQL CONNECT :username IDENTIFIED BY :password;
+	printf("\Conectado a Oracle bajo Username: %s\n", username);
+	
+	
+	EXEC SQL WHENEVER SQLERROR do sql_error("ORACLE error--");
+	
+	EXEC SQL DECLARE p_cursor CURSOR for
+		SELECT estu_cod_estudio,estu_nombre_estudio
+		FROM bs_abo_estu_estudios
+		ORDER BY estu_cod_estudio;
+	
+	EXEC SQL open p_cursor;
+	
+	printf("\n\nLos Estudios Juridcos son.\n");
+	printf("--------------------------\n\n");
+	printf("Codigo\t\t\tNombre de Estudio\n");
+	printf("------\t\t\t-----------------\n");
+	
+	EXEC SQL WHENEVER NOT FOUND do break;
+/*	
+	while(1) {
+		EXEC SQL FETCH p_cursor INTO :estudios;
+		n=(sqlca.sqlerrd[2]-n);
+		for(i=0;i<n;i++)
+			printf("%s\t\t%s\t%s\n", estudios[i].codigo,
+								estudios[i].nombre);
+		if((sqlca.sqlerrd[2]-n)>0) {
+			for(i=0;i<n;i++) {
+				printf("\nSegunda vuelta\n");
+				printf("%s\t\t%s\t%s\n", estudios[i].codigo,
+								estudios[i].nombre);
+			}
+		}
+			
+	}
+*/	
+/********************PRUEBA ************/
+	while(1) {
+		EXEC SQL FETCH p_cursor INTO :estudios;
+		n=(sqlca.sqlerrd[2]-n);		
+	}
+	for(i=0;i<n;i++)
+		printf("%s\t%s\n", estudios[i].codigo,
+								estudios[i].nombre);
+
+/********************Fin PRUEBA**************/		
+	EXEC SQL close p_cursor;
+	
+	printf("\nLa consulta fue realizada con Exito\n");
+	
+	EXEC SQL COMMIT WORK RELEASE;
+	
+	exit(0);
+}
+
+void
+sql_error(msg)
+char *msg;
+{
+	char err_msg[512];
+	int buf_len, msg_len;
+	
+	EXEC SQL WHENEVER SQLERROR continue;
+	
+	printf("\n%s\n", msg);
+	
+	buf_len=sizeof(err_msg);
+	sqlglm(err_msg, &buf_len, &msg_len);
+	printf("%.*s\n", msg_len, err_msg);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	exit(1);
+}

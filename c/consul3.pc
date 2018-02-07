@@ -1,0 +1,116 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sqlca.h>
+#include <oraca.h>
+
+
+void sql_error();
+
+int main()
+{
+	char username[100];
+	char password[20];
+	
+	long lVAAR_CODIGO[10], lVARE_ORDEN[10];
+	long lAcu, lCont, lTotFetch;
+	long lAcu2, lCont2, lTotFetch2;
+	
+	char aszVACA_VALOR[50][10];
+	
+	lAcu = lCont = lTotFetch = 0;
+	lAcu2 = lCont2 = lTotFetch2 = 0;
+	
+	strcpy(username, "dalmolid");
+	strcpy(password, "molid67");
+		
+	EXEC SQL WHENEVER SQLERROR do sql_error("ORACLE error--");
+	EXEC SQL CONNECT :username IDENTIFIED BY :password;
+	printf("Conectado a Oracle bajo Username: %s\n", username);
+	
+
+	EXEC SQL 
+	    DECLARE p_cursor CURSOR FOR
+	    SELECT VAAR_CODIGO, VARE_ORDEN
+	    FROM BS_ROA_VACA_VALORES_CAMP
+	    WHERE VAAR_CODIGO = 1
+	    AND VARE_ORDEN < 45
+	    GROUP BY VAAR_CODIGO, VARE_ORDEN
+	    ORDER BY VARE_ORDEN ASC;
+										     
+
+	
+	EXEC SQL open p_cursor;
+	
+
+	while(1) {
+	    EXEC SQL FETCH p_cursor INTO :lVAAR_CODIGO, lVARE_ORDEN;
+	    
+	    lTotFetch = sqlca.sqlerrd[2]  - lAcu;
+	    
+	    printf("sqlca.sqlerrd[2]= %d\n", sqlca.sqlerrd[2]);
+	    lAcu = sqlca.sqlerrd[2];
+
+	    for(lCont = 0; lCont < lTotFetch; lCont++) {
+    	    
+		EXEC SQL
+		    DECLARE p_cursor2 CURSOR FOR
+		    SELECT VACA_VALOR
+		    FROM BS_ROA_VACA_VALORES_CAMP
+		    WHERE VAAR_CODIGO = :lVAAR_CODIGO
+		    AND VARE_ORDEN = :lVARE_ORDEN
+		    ORDER BY VACA_ORDEN ASC;
+		
+		EXEC SQL OPEN p_cursor2;
+	    
+		while(1) {
+		    EXEC SQL FETCH p_cursor2 INTO :aszVACA_VALOR;
+
+    		    lTotFetch2 = sqlca.sqlerrd[2]  - lAcu2;
+	    
+		    printf("sqlca.sqlerrd[2]= %d\n", sqlca.sqlerrd[2]);
+		    lAcu2 = sqlca.sqlerrd[2];
+		    
+		    for(lCont2 = 0; lCont2 < lTotFetch2; lCont2++) {
+			printf("VacaValor= (%s)\n", aszVACA_VALOR[lCont2]);
+	    
+		    }
+		    if (sqlca.sqlcode == 1403) break;
+
+		}
+	    
+		EXEC SQL close p_cursor2;
+	    
+	    
+		printf("%d\t%d\t\n", lVAAR_CODIGO[lCont], lVARE_ORDEN[lCont]);
+	    }  
+		
+	    if (sqlca.sqlcode == 1403) break;
+
+	}
+
+	EXEC SQL close p_cursor;
+	
+	
+	EXEC SQL COMMIT WORK RELEASE;
+	
+	exit(0);
+}
+
+void
+sql_error(msg)
+char *msg;
+{
+	char err_msg[512];
+	int buf_len, msg_len;
+	
+	EXEC SQL WHENEVER SQLERROR continue;
+	
+	printf("\n%s\n", msg);
+	
+	buf_len=sizeof(err_msg);
+	sqlglm(err_msg, &buf_len, &msg_len);
+	printf("%.*s\n", msg_len, err_msg);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	exit(1);
+}

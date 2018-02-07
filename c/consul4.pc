@@ -1,0 +1,141 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sqlca.h>
+#include <oraca.h>
+
+#define MAX 1
+
+
+
+struct BS_ROA_BORRAR {
+    char szCLAVE[6];
+	char szDESCR[51];
+};
+
+void sql_error(char *msg);
+int MostrarTabla(struct BS_ROA_BORRAR *arr, int iCant);
+
+int main()
+{
+
+	int i, iTotFetch, iAcu, iCant;
+	char username[100];
+	char password[20];
+	char nombre[MAX][51], codigo[MAX][10], szCLAVE[MAX][10], szDESCR[10];
+	struct BS_ROA_BORRAR *asBS_ROA_BORRAR;
+	VARCHAR nom[MAX][51];
+	
+	
+	strcpy(username, "pais");
+	strcpy(password, "nueva");
+		
+	EXEC SQL WHENEVER SQLERROR do sql_error("ORACLE error--");
+	EXEC SQL CONNECT :username IDENTIFIED BY :password;
+	printf("Conectado a Oracle bajo Username: %s\n", username);
+	
+	EXEC SQL DECLARE p_cursor CURSOR for
+		SELECT clave, descr, descr
+		FROM bs_roa_borrar;
+	
+	EXEC SQL open p_cursor;
+	
+	i= iTotFetch = iAcu = 0;
+	printf("Codigo\t\t\tDescripcion\n");
+	printf("------\t\t\t-----------------\n");
+
+	while(1) {
+		EXEC SQL FETCH p_cursor INTO :codigo, :nombre, :nom;
+		
+		
+		iTotFetch = sqlca.sqlerrd[2] - iAcu;
+		iAcu = sqlca.sqlerrd[2];
+		
+		printf("Fetch= %d - Acu = %d\n", iTotFetch, iAcu);
+		for(i=0; i<iTotFetch; i++) {
+		    printf("(%s)\t\t(%s)\t%d\n", codigo[i], nombre[i], strlen(nombre[i]));
+		    printf("(%s)\t\t(%s)\t%d\n", codigo[i], nom[i].arr, nom[i].len);
+		    printf("-------------------\n");
+		}
+		if (sqlca.sqlcode == 1403) break;
+
+	}
+
+	EXEC SQL close p_cursor;
+	
+	EXEC SQL UPDATE BS_ROA_BORRAR
+	SET DESCR = 'SEBA'
+	WHERE CLAVE = '133';
+	
+	printf("sqlca.sqlerrd[2]= %d\n", sqlca.sqlerrd[2]);
+	
+	
+	EXEC SQL SELECT COUNT(*)
+	INTO :iCant
+	FROM BS_ROA_BORRAR;
+	
+	printf("iCant= %d\n", iCant);
+	asBS_ROA_BORRAR = (struct BS_ROA_BORRAR *)malloc(sizeof(struct BS_ROA_BORRAR) * iCant);
+
+	EXEC SQL DECLARE p_cursor2 CURSOR for
+		SELECT clave, descr
+		FROM bs_roa_borrar
+		WHERE ROWNUM < :iCant + 1;
+	
+
+	EXEC SQL open p_cursor2;
+
+	EXEC SQL FOR :iCant FETCH p_cursor2 INTO :asBS_ROA_BORRAR;
+
+	EXEC SQL close p_cursor2;
+
+	MostrarTabla(asBS_ROA_BORRAR, iCant);
+	
+	printf("Otra Vez\n");
+	
+	for(i=0; i<iCant; i++) {
+	    printf("CLAVE = (%s)\n", asBS_ROA_BORRAR->szCLAVE);
+		asBS_ROA_BORRAR++;
+	}
+	
+	EXEC SQL
+	    select descr
+	    into :szDESCR
+	    from bs_roa_borrar
+	    where clave = 'qw12';
+	    
+	printf("sqlca.sqlcode= %d\n", sqlca.sqlcode);
+	printf("sqlca.sqlerrd[2]= %d\n", sqlca.sqlerrd[2]);
+	
+	
+	printf("FIN\n");
+	EXEC SQL COMMIT WORK RELEASE;
+	
+}
+
+int MostrarTabla(struct BS_ROA_BORRAR *arr, int iCant)
+{
+	register int i;
+	
+	for(i=0; i<iCant; i++) {
+	    printf("CLAVE = (%s) DESCR= (%s)\n", arr->szCLAVE, arr->szDESCR);
+		arr++;
+	}
+
+}
+
+void sql_error(char *msg)
+{
+	char err_msg[512];
+	int buf_len, msg_len;
+	
+	EXEC SQL WHENEVER SQLERROR continue;
+	
+	printf("\n%s\n", msg);
+	
+	buf_len=sizeof(err_msg);
+	sqlglm(err_msg, &buf_len, &msg_len);
+	printf("%.*s\n", msg_len, err_msg);
+	
+	EXEC SQL ROLLBACK RELEASE;
+	exit(1);
+}
