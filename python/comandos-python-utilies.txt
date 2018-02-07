@@ -1,0 +1,144 @@
+>>>name = "Joel"
+>>>job = "Programmer"
+
+>>>title = name + " the " + job
+>>>title
+>"Joel the Programmer"
+
+>>>title = "{} the {}".format(name, job)
+>>>title
+>"Joel the Programmer"
+
+>>>age = 28
+>>>title = "{} the {} of {} years".format(name, job, age)
+>>>title
+>"Joel the Programmer of 28 years"
+
+>>>availability = ["Monday", "Wednesday", "Friday", "Saturday"]
+>>>result = " - ".join(availability)
+>>>result
+>'Monday - Wednesday - Friday - Saturday'
+
+>>>x = 10
+>>>print(x == 10) # True
+>>>print(x != 10) # False
+>>>print(x <> 10) # False, same as != operator
+>>>print(x > 5) # True
+>>>print(x < 15) # True
+>>>print(x >= 10) # True
+>>>print(x <= 10) # True
+
+>>>a = [1,2,3]
+>>>b = [1,2,3]
+>>>c = a
+>>>print(a == b) # True
+>>>print(a is b) # False
+>>>print(a is c) # True
+
+>>>a = [1,2,3]
+>>>b = [1,2,3]
+>>>if a is not b:
+>>>    # Do something here
+
+>>>x = False
+>>>if not x:
+>>>    # Do something here
+
+>>>availability = ["Monday", "Tuesday", "Friday"]
+>>>request = "Saturday"
+>>>if request in availability:
+>>>    print("I'm available on that day!")
+
+>>>legs = 8
+>>>habitat = "Land"
+>>>if legs == 8 and habitat == "Land":
+>>>    species = "Spider"
+
+>>>weather = "Sunny"
+>>>if weather == "Rain" or weather == "Snow":
+>>>    umbrella = True
+>>>else:
+>>>    umbrella = False
+
+>>>weather = "Sunny"
+>>>umbrella = weather == "Rain" or weather == "Snow"
+>>>umbrella
+>False
+
+>>>i = 0
+>>>while i < 10:
+>>>    print(i)
+>>>    i = i + 1
+
+>>>i = 0
+>>>while True:
+>>>    print(i)
+>>>    if i >= 10:
+>>>    break
+
+>>>weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+>>>for day in weekdays:
+>>>    print(day)
+
+>>># Prints 0,1,2,3,4,5,6,7,8,9
+>>>for i in range(10):
+>>>    print(i)
+
+>>># Prints 5,6,7,8,9
+>>>for i in range(5, 10):
+>>>    print(i)
+
+
+>>># Prints 5,7,9
+>>>for i in range(5, 10, 2):
+>>>    print(i)
+
+>>>weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+>>>for i, day in enumerate(weekdays):
+>>>    print("{} is weekday {}".format(day, i))
+
+>>>i = 0
+>>>for day in weekdays:
+>>>    print("{} is weekday {}".format(day, i))
+>>>    i = i + 1
+
+>>>d = {}
+
+>>>d = {}
+>>>d["one_key"] = 10
+>>>d["two_key"] = 25
+>>>d["another_key"] = "Whatever you want"
+
+>>>d = {
+>>>    "one_key": 10,
+>>>    "two_key": 25,
+>>>    "another_key": "Whatever you want"
+>>>}
+
+>>>d["one_key"]
+>10
+>>>d["another_key"]
+>"Whatever you want"
+>>>d["one_key"] + d["two_key"]
+>35
+
+>>>for key in d:
+>>>    print(key)
+
+>>>for key, value in d.items():
+>>>    print(key, value)
+
+>>>del d["one_key"]
+
+>>>capitals = {
+>>>    "Alabama": "Montgomery",
+>>>    "Alaska": "Juneau",
+>>>    "Arizona": "Phoenix",
+>>>    ...
+>>>}
+
+>>>state = "Pennsylvania"
+>>>capitals[state]
+>"Harrisburg"
+
+
