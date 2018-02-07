@@ -1,0 +1,1281 @@
+/**********************************************************************************************************************
+Nombre de archivo:			alternativo.Pc
+Autor:						Juan E. Lamberti
+Seguridad:					Personal, Confidencial
+Descripcion:				Libreria de funciones para leer y escribir archivos con formato Alternativo
+Inventario de Funciones:	ifnArmRegis					arma la estructura a partir de un archivo de entrada
+							ifnGenRegAlternativo		escribe el registro de llamadas o cargos
+							ifnGenNomAlternativo		genera los nombres de los archivos de llamadas y/o cargos
+							ifnGetDN_ESN_MIN			Obtiene el DN y el ESN a partir del MIN
+							ifnValidaRegAlternativo		Verifica el contenido del registro de Alternativo
+							vfnIniEstructuras			Inicializa las estructuras
+
+Log de Modificaciones:
+Fecha			Ver		Quien				Descripcion
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+19/09/2000		1		Lamberti, Juan		Creacion
+27/09/2000		1.1		Lamberti, Juan		Se agrega funcion de creacion de nombres de archivos
+											ifnGenNomAlternativo
+28/09/2000		1.11	Lamberti, Juan		Se agrega campo de TAX
+											correccion de manejo de decimales en registro de cargos
+											manejo de banderas para agregar el path al nombre de los archivos
+11/10/2000		1.3		Lamberti, Juan		Se agrega funcion de validacion de registros de llamadas y cargos
+06/04/2001		1.4		Lamberti, Juan		Control de limite de credito (CR 110)
+07/02/2002		1.5		Torosiaj, Jorge		Modificación en la generación de nombres de archivos
+**********************************************************************************************************************/
+#include <alternativo.h>
+#include <lib_dupli.h>
+
+/**********************************************************************************************************************
+Nombre Funcion:			ifnArmRegis
+Argumentos:				puntero a FILE entrada, estructura del registro de llamadas y cargos de Alternativo
+Valores que retorna:	ALT_SUCCESSFULL	--> EJECUCION EXITOSA
+						ALT_NO_DN			--> FALTA LA DEFINICION DEL DN
+						ALT_NO_ESN			--> FALTA LA DEFINICION DEL ESN
+						ALT_NO_TIPO_PLAN	--> FALTA LA DEFINICION DEL TIPO DE PLAN
+						ALT_MAL_LECTURA		--> NO SE PUDE LEER EL ARHCIVO DE ENTRADA
+						ALT_FIN_ARCH		--> SE TERMINO DE LEER EL ARCHIVO
+
+Descripcion:			del archvio fIn lee un registro y luego lo vuelca a la estructura de llamada o cargos segun
+						corresponda. El archivo debe estar abierto.
+**********************************************************************************************************************/
+int ifnArmRegis(FILE *fIn, FILE *pfBusq, struct sRLAlt *psRegLlamadasAlt, struct sRCAlt *psRegCargosAlt, struct sEAlt *psErroresAlt) {
+
+	char cLinea[100];			/* REGISTRO INPUT */
+	int iNueva;					/* BANDERA DE NUEVA VERSION */
+	int t;						/* CONTADOR */
+	int iRetCode;				/* CODIGO DE RETORNO DE LAS FUNCIONES */
+	char szMsjError[MAX_STR];	/* PARA LOS MENSAJES DE ERROR */
+
+	/* INCICIALIZO LAS VARIABLES */
+	vfnIniEstructuras(NULL, NULL, psErroresAlt);
+
+	/* LEO LA LINEA */
+	if(!fgets(cLinea, 100, fIn)) {
+		/* SI HAY ERROR DEVUELVO FALSO */
+		if(!feof(fIn)) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_LECTURA, "Hubo un error al leer el archivo de alternativo", TRUE);
+			return(ALT_ERRORES_REG);
+		} else {
+			return(ALT_FIN_ARCH);
+		}
+	}
+
+	if(psRegLlamadasAlt) {
+		/* INICIALIZO LAS VARIABLES */
+		vfnIniEstructuras(psRegLlamadasAlt, NULL, NULL);
+		if(strlen(cLinea) == 91) {
+			/* ARMO EL REGISTRO */
+			memcpy(psRegLlamadasAlt->cNumMin, cLinea, 10);
+			memcpy(psRegLlamadasAlt->cFecha, 10+cLinea, 6);
+			memcpy(psRegLlamadasAlt->cHora, 16+cLinea, 6);
+			psRegLlamadasAlt->liSegAire = lifnAtoln(22+cLinea, 6);
+			psRegLlamadasAlt->liSegDura = lifnAtoln(28+cLinea, 6);
+			psRegLlamadasAlt->dPulsos = (double)lifnAtoln(34+cLinea, 8) / 100.;
+			psRegLlamadasAlt->dDurac = (double)lifnAtoln(42+cLinea, 8) / 100.;
+			memcpy(psRegLlamadasAlt->cNumDestino, 50+cLinea, 18);
+			psRegLlamadasAlt->cFDire = cLinea[68];
+			psRegLlamadasAlt->cFIddi = cLinea[69];
+			psRegLlamadasAlt->cFiller = cLinea[90];
+
+
+			/* SACO LOS ESPACIOS A LA DERECHA */
+			pcfnTrimR(psRegLlamadasAlt->cNumMin);
+			pcfnTrimR(psRegLlamadasAlt->cNumDestino);
+
+			if(strncmp("        ", cLinea+82, 8) == 0) {
+				iNueva = FALSE;
+			} else {
+				iNueva = TRUE;
+			}
+			for(t=82;iNueva && t<90;t++) {
+				if(isalpha(cLinea+t) && !isspace(cLinea+t)) {
+					iNueva = FALSE;
+				}
+			}
+
+			/* CONVIERTO A LA NUEVA VERSION DE ALTERNATIVO PARA ROAMING MANUAL */
+			if(iNueva) {
+				memcpy(psRegLlamadasAlt->cDestino, 70+cLinea, 12);
+				psRegLlamadasAlt->dTAX = (double)lifnAtoln(82+cLinea, 8) / 100.;
+			} else {
+				memcpy(psRegLlamadasAlt->cDestino, 70+cLinea, 20);
+			}
+
+			/* OBTENGO EL DIRECTORY NUMBER Y EL ESN */
+			iRetCode = ifnGetDN_ESN_MIN(pfBusq, psRegLlamadasAlt, NULL);
+			if(iRetCode != ALT_SUCCESSFULL) {
+				sprintf(szMsjError, "No se encontro la definicion del DN, ESN y/o tipo de linea para el MIN=(%s)", psRegLlamadasAlt->cNumMin);
+				ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_NO_ESN , szMsjError, FALSE);
+			}
+
+
+		} else {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_LECTURA, "Error en el largo del registro de llamadas del archivo de Alternativo", TRUE);
+			iRetCode = ALT_ERRORES_REG;
+		} /* -if- largo OK */
+	} else {
+		if(psRegCargosAlt) {
+			/* INICIALIZO LAS VARIABLES */
+			vfnIniEstructuras(NULL, psRegCargosAlt, NULL);
+
+			if(strlen(cLinea) == 26) {
+				memcpy(psRegCargosAlt->cNumMin, cLinea, 10);
+				memcpy(psRegCargosAlt->cFecha, 10+cLinea, 6);
+				psRegCargosAlt->dCargo = (double)lifnAtoln(16+cLinea, 9) / 100.;
+
+				/* OBTENGO EL DN, ESN Y TIPO DE LLINEA */
+				iRetCode = ifnGetDN_ESN_MIN(pfBusq, NULL, psRegCargosAlt);
+				if(iRetCode != ALT_SUCCESSFULL) {
+					sprintf(szMsjError, "No se encontro la definicion del DN, ESN y/o tipo de linea para el MIN=(%s)", psRegCargosAlt->cNumMin);
+					ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_NO_ESN , szMsjError, FALSE);
+				}
+
+			} else {
+				ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_LECTURA, "Error en el largo del registro de cargos del archivo de Alternativo", TRUE);
+			iRetCode = ALT_ERRORES_REG;
+			}
+		} else {
+			printf("Hay un error en los parametros de la funcion ifnArmRegis\n");
+			iRetCode = ALT_PARAMETROS;
+		} /* -if- sRegCargosAlt */
+	} /* -if- sRegLlamadasAlt */ 
+
+	return(iRetCode);
+
+}
+
+/**********************************************************************************************************************************
+
+ESTO LO HACIA EL DNH AHORA EL ICH
+
+Nombre Funcion:			ifnGetDN_ESN_MIN
+Argumentos:				puntero a la estructura del registro de llamadas de Alternativo
+Valores que retorna:	ALT_SUCCESSFULL	--> EJECUCION EXITOSA
+						ALT_PARAMETROS	--> LOS APRAMETROS SON ERRONEOS, las estrucutras no estan definidas
+						ALT_ERRORES_REG	--> FALTA LA DEFINICION DEL MIN
+Descripcion:			obtiene el Directory Number [DN] y el Electronic Serial Number [ESN] a partir del MIN
+**********************************************************************************************************************************/
+int ifnGetDN_ESN_MIN(FILE *pfBusq, struct sRLAlt *psRegLlamadasAlt, struct sRCAlt *psRegCargosAlt) {
+
+	int iRetCode;				/* código de retorno de la función */
+	int iFlag = 0;              /* para salir del loop de búsqueda */
+	int iAutInc = 0;            /* contador subíndice para los MINes repetidos */
+	char szKey[MAXSTRING];		/* clave a buscar en el archivo */
+    char szDatos1[MAXSTRING];   /* fecha desde + fecha hasta */
+    char szDatos2[MAXSTRING];   /* DN + ESN + TIPO DE SERVICIO + PREFIJO */
+    statusEnum eRetCode;        /* código de retorno de la función de búsqueda de la skip list */
+
+    char szFechaIniCont[SKIP_LIST_FECHA_INI_LONG + 1];  /* fecha de inicio del contrato */
+    char szFechaFinCont[SKIP_LIST_FECHA_FIN_LONG + 1];  /* fecha de fin del contrato */
+    char szFechaLlamada[SKIP_LIST_FECHA_INI_LONG + 1];  /* fecha de la llamada completa */
+
+    char szFechaIni[SKIP_LIST_FECHA_INI_SOLA_LONG + 1]; /* fecha sola de inicio del contrato */
+    char szFechaFin[SKIP_LIST_FECHA_FIN_SOLA_LONG + 1]; /* fecha sola de fin del contrato */
+    char szHoraIni[SKIP_LIST_HORA_INI_SOLA_LONG + 1];   /* hora de inicio del contrato */
+    char szHoraFin[SKIP_LIST_HORA_FIN_SOLA_LONG + 1];   /* hora de fin del contrato */
+    char szFechaLlam[SKIP_LIST_FECHA_INI_SOLA_LONG + 1];     /* fecha sola de la llamada */
+    char szHoraLlam[SKIP_LIST_HORA_INI_SOLA_LONG + 1];       /* hora de la llamada */
+
+    int iCont;          /* contador genérico */
+    int iFlagValida;    /* flag de validación de fechas */
+
+	/* INICIALIZO LAS VARIABLES */
+	memset(szKey, 0, MAX_STR);
+
+    /* uno de los dos punteros debe ser nulo */
+	if(psRegLlamadasAlt && psRegCargosAlt) {
+		return(ALT_PARAMETROS);
+	}
+
+/*
+CLAVE PRIMARIA: MIN + XXX -> número subíndice en caso que se repita el MIN
+DATOS1: FECHA DESDE + FECHA HASTA
+DATOS2: DN + ESN + TIPO DE SERVICIO + PREFIJO
+*/
+
+/* DEBE ESTAR CARGADA DE ANTEMANO LA SKIP LIST EN MEMORIA !!!!! */
+
+	iFlag = 0;
+	iAutInc = 0;
+	do
+	{
+    	/* armo la clave de búsqueda utilizando la longitud de los números MIN */
+	    /* y le agrego el subíndice que se utiliza para los MINes repetidos */
+	    sprintf(szKey, "%*s%03d", MAX_MIN - 1, psRegLlamadasAlt ?
+	        psRegLlamadasAlt->cNumMin : psRegCargosAlt->cNumMin, iAutInc);
+
+    	eRetCode = eBuscar(szKey, szDatos1, szDatos2, ACCION_NADA);
+
+    	if (eRetCode == STATUS_CLAVE_ENCONTRADA)
+    	{
+			if(psRegLlamadasAlt)
+			{
+       			/* cargo los datos asociados del registro encontrado en psRegLlamadasAlt */
+   	    		memcpy(psRegLlamadasAlt->szDN, szDatos2 + SKIP_LIST_DN_POS, SKIP_LIST_DN_LONG);
+   		    	psRegLlamadasAlt->szDN [SKIP_LIST_DN_LONG] = 0;
+   		    	memcpy(psRegLlamadasAlt->szESN, szDatos2 + SKIP_LIST_ESN_POS, SKIP_LIST_ESN_LONG);
+                psRegLlamadasAlt->szESN [SKIP_LIST_ESN_LONG] = 0;
+   			    memcpy(psRegLlamadasAlt->szTipoPlan, szDatos2 + SKIP_LIST_TIPO_SERVICIO_POS, SKIP_LIST_TIPO_SERVICIO_LONG );
+   	    		psRegLlamadasAlt->szTipoPlan [SKIP_LIST_TIPO_SERVICIO_LONG] = 0;
+   	    		/* QUITO LOS ESPACIOS INNECESARIOS */
+   		    	pcfnTrimR(psRegLlamadasAlt->szDN);
+       			pcfnTrimR(psRegLlamadasAlt->szESN);
+   			    pcfnTrimR(psRegLlamadasAlt->szTipoPlan);
+			}
+			else
+			{
+       			/* cargo los datos asociados del registro encontrado en psRegCargosAlt */
+   	    		memcpy(psRegCargosAlt->szDN, szDatos2 + SKIP_LIST_DN_POS, SKIP_LIST_DN_LONG);
+   		    	psRegCargosAlt->szDN [SKIP_LIST_DN_LONG] = 0;
+   		    	memcpy(psRegCargosAlt->szESN, szDatos2 + SKIP_LIST_ESN_POS, SKIP_LIST_ESN_LONG);
+                psRegCargosAlt->szESN [SKIP_LIST_ESN_LONG] = 0;
+   			    memcpy(psRegCargosAlt->szTipoPlan, szDatos2 + SKIP_LIST_TIPO_SERVICIO_POS, SKIP_LIST_TIPO_SERVICIO_LONG );
+   	    		psRegCargosAlt->szTipoPlan [SKIP_LIST_TIPO_SERVICIO_LONG] = 0;
+   	    		/* QUITO LOS ESPACIOS INNECESARIOS */
+   		    	pcfnTrimR(psRegCargosAlt->szDN);
+       			pcfnTrimR(psRegCargosAlt->szESN);
+   			    pcfnTrimR(psRegCargosAlt->szTipoPlan);
+            }
+
+   			/* encontré un MIN con un subíndice coincidente, ahora debo verificar
+   			si la fecha de la llamada está dentro del rango de las fechas del contrato */
+            iFlagValida = 1;    /* valido por default */
+
+            /* verifico que la fecha de inicio del contrato sea válida */
+            memcpy ( szFechaIni, szDatos1 + SKIP_LIST_FECHA_INI_SOLA_POS, SKIP_LIST_FECHA_INI_SOLA_LONG );
+            szFechaIni [ SKIP_LIST_FECHA_INI_SOLA_LONG ] = 0;
+            for (iCont = 0 ; iCont < SKIP_LIST_FECHA_INI_SOLA_LONG ; iCont++ )
+                if(szFechaIni[iCont]<'0' || szFechaIni[iCont]>'9') iFlagValida = 0;
+
+            /* verifico que la fecha de fin del contrato sea válida */
+            memcpy ( szFechaFin, szDatos1 + SKIP_LIST_FECHA_FIN_SOLA_POS, SKIP_LIST_FECHA_FIN_SOLA_LONG );
+            szFechaFin [ SKIP_LIST_FECHA_FIN_SOLA_LONG ] = 0;
+            for (iCont = 0 ; iCont < SKIP_LIST_FECHA_FIN_SOLA_LONG ; iCont++ )
+                if(szFechaFin[iCont]<'0' || szFechaFin[iCont]>'9')
+                {
+                    /* si la hora no es válida la inicializo en un valor arbitrariamente
+                    igual a 0hs 0min 0seg y sigo adelante */
+                    strcpy(szFechaFin, "99991231");  /* ponemos la fecha del fin del mundo ... */
+                    break; /* salgo del ciclo for */
+                }
+
+            /* verifico que la hora de inicio del contrato sea válida */
+            memcpy ( szHoraIni, szDatos1 + SKIP_LIST_HORA_INI_SOLA_POS, SKIP_LIST_HORA_INI_SOLA_LONG );
+            szHoraIni [ SKIP_LIST_HORA_INI_SOLA_LONG ] = 0;
+            for (iCont = 0 ; iCont < SKIP_LIST_HORA_INI_SOLA_LONG ; iCont++ )
+                if(szHoraIni[iCont]<'0' || szHoraIni[iCont]>'9')
+                {
+                    /* si la hora no es válida la inicializo en un valor arbitrariamente
+                    igual a 0hs 0min 0seg y sigo adelante */
+                    strcpy(szHoraIni, "000000");
+                    break; /* salgo del ciclo for */
+                }
+
+            /* verifico que la hora de fin del contrato sea válida */
+            memcpy ( szHoraFin, szDatos1 + SKIP_LIST_HORA_FIN_SOLA_POS, SKIP_LIST_HORA_FIN_SOLA_LONG );
+            szHoraFin [ SKIP_LIST_HORA_FIN_SOLA_LONG ] = 0;
+            for (iCont = 0 ; iCont < SKIP_LIST_HORA_FIN_SOLA_LONG ; iCont++ )
+                if(szHoraFin[iCont]<'0' || szHoraFin[iCont]>'9')
+                {
+                    /* si la hora no es válida la inicializo en un valor arbitrariamente
+                    igual a 23hs 59min 59seg y sigo adelante */
+                    strcpy(szHoraFin, "235959");
+                    break; /* salgo del ciclo for */
+                }
+
+            /* verifico que la fecha de la llamada sea válida */
+            strcpy(szFechaLlam, "20");  /* el año viene con 2 dígitos */
+            if(psRegLlamadasAlt) strcat(szFechaLlam, psRegLlamadasAlt->cFecha);
+            else strcat ( szFechaLlam, psRegCargosAlt->cFecha );
+            
+            for (iCont = 0 ; iCont < strlen (szFechaLlam) ; iCont++ )
+                if(szFechaLlam[iCont]<'0' || szFechaLlam[iCont]>'9') iFlagValida = 0;
+
+            /* verifico que la hora de la llamada sea válida */
+            strcpy ( szHoraLlam, psRegLlamadasAlt ? psRegLlamadasAlt->cHora : "000000" );
+            for (iCont = 0 ; iCont < strlen (szHoraLlam) ; iCont++ )
+                if(szHoraLlam[iCont]<'0' || szHoraLlam[iCont]>'9')
+                {
+                    /* si la hora no es válida la inicializo en un valor arbitrariamente
+                    igual a 12hs 00min 00seg y sigo adelante */
+                    strcpy(szHoraLlam, "120000");
+                    break; /* salgo del ciclo for */
+                }
+
+            if( iFlagValida )
+            {
+                /* rearmar la fecha completa de inicio y fin del contrato */
+                strcpy ( szFechaIniCont, szFechaIni);
+                strcat ( szFechaIniCont, szHoraIni);
+                strcpy ( szFechaFinCont, szFechaFin);
+                strcat ( szFechaFinCont, szHoraFin);
+                /* rearmar la fecha completa de la llamada */
+                strcpy ( szFechaLlamada, szFechaLlam );
+                strcat ( szFechaLlamada, szHoraLlam );
+
+                /* Finalmente puedo hacer las comparaciones para verificar si la fecha
+                de la llamada está comprendida entre las fechas de inicio y fin del contrato */
+
+                if ( ( strcmp( szFechaLlamada, szFechaIniCont ) >= 0 ) &&
+                    ( strcmp( szFechaLlamada, szFechaFinCont ) <= 0 ) )
+                {
+                    /* si iFlagValida estaba en 1 y se verifica que la fecha de la llamada
+                    corresponde al lapso de fechas del contrato, entonces no hago nada y dejo
+                    iFlagValida con su valor = 1 */
+
+                    /*printf("\nFecha Valida = %d",iFlagValida);*/
+
+                }
+                else
+                {
+                    /* pero si la fecha no corresponde bajo el flag */
+                    iFlagValida = 0;
+                    /* printf("\nLa fecha no corresponde"); */
+                }
+            }
+
+            if ( iFlagValida )
+            {
+        		iFlag = 1;
+   	    		iRetCode = ALT_SUCCESSFULL;
+                continue;  /* saltearse el resto hasta el while */
+            }
+            else
+            {
+                /* habiendo encontrado la clave de búsqueda no encontré una fecha
+                coherente, por lo que incremento el subíndice y vuelvo a hacer una
+                nueva búsqueda */
+                iAutInc++;
+                iFlag = 0;
+                continue;  /* saltearse el resto hasta el while */
+            }
+        }
+
+        else
+        {
+		    iFlag = 1;
+            if ( eRetCode == STATUS_CLAVE_NO_ENCONTRADA )
+            {
+                /* no encontré la clave de búsqueda, entonces salgo */
+   		    	iRetCode = ALT_ERRORES_REG;
+   			    /* printf("\nClave no encontrada..."); */
+   			}
+   			else
+   			{
+   			    /* hubo algún error en la búsqueda de la clave en la skip list */
+                iRetCode = ALT_ERROR_BUSQUEDA_SKIP_LIST;
+   			}
+    	}
+
+    } while (iFlag == 0);
+
+	return(iRetCode);
+}
+
+
+/**********************************************************************************************************************************
+Nombre Funcion:			ifnGenRegAlternativo
+Argumentos:				Puntero a FILE de salida, estructura del registro de llamadas y cargos de Alternativo
+Valores que retorna:	Verdadero o falso de la escritura correcta en el archivo de salida
+Descripcion:			Genera un registro tipo Alternativo a partir de una estructura. El archivo debe estar abierto.
+**********************************************************************************************************************************/
+int ifnGenRegAlternativo(FILE *fOut, struct sRLAlt *sRegLlamadasAlt, struct sRCAlt *sRegCargosAlt) {
+
+	char cRegistro[MAX_STR];
+
+	memset(cRegistro, 0, MAX_STR);
+
+	if(sRegLlamadasAlt) {
+		/* REGISTRO DE LLAMADAS */
+		strcpy(cRegistro, sRegLlamadasAlt->cNumMin);
+		strcpy(cRegistro+10, sRegLlamadasAlt->cFecha);
+		strcpy(cRegistro+16, sRegLlamadasAlt->cHora);
+		sprintf(cRegistro+22, "%06ld", sRegLlamadasAlt->liSegAire);
+		sprintf(cRegistro+28, "%06ld", sRegLlamadasAlt->liSegDura);
+		sprintf(cRegistro+34, "%08.0f", sRegLlamadasAlt->dPulsos * 100.);
+		sprintf(cRegistro+42, "%08.0f", sRegLlamadasAlt->dDurac * 100.);
+		sprintf(cRegistro+50, "% -18s", sRegLlamadasAlt->cNumDestino);
+
+		cRegistro[68] = sRegLlamadasAlt->cFDire;
+		cRegistro[69] = sRegLlamadasAlt->cFIddi;
+
+		/* CONTROL DE NUEVA VERSION DE ALTERNATIVO -ROAMING MANUAL- */
+		if(sRegLlamadasAlt->dTAX > 0.) {
+			strncpy(cRegistro+70, sRegLlamadasAlt->cDestino, 12);
+			sprintf(cRegistro+82, "%08.0f", sRegLlamadasAlt->dTAX * 100.);
+		} else {
+			sprintf(cRegistro+70, "% -20s", sRegLlamadasAlt->cDestino);
+		}
+
+	} else {
+		/* REGISTRO DE CARGOS */
+		if(sRegCargosAlt) {
+			strcpy(cRegistro, sRegCargosAlt->cNumMin);
+			strcpy(cRegistro+10, sRegCargosAlt->cFecha);
+			sprintf(cRegistro+16, "%09.f", sRegCargosAlt->dCargo * 100.);
+		} else {
+			return(FALSE);
+		}
+	}
+
+	fprintf(fOut, "%s\n", cRegistro);
+
+	return(!ferror(fOut));
+
+}
+
+
+/**********************************************************************************************************************************
+Nombre Funcion:			ifnGenNomAlternativo
+Argumentos:				PLCode codigo interno de BSCS,
+						Numero de cinta,
+						Strings donde se retorna el nombre de los archivos de alternativo
+						Banderas para agregar el path al nombre de los archivos
+Valores que retorna:	Verdadero o falso
+Descripcion:			Retorna los nombres de alternativo para llamadas y cargos en las variables.
+						Retorna falso en caso de que no se encuentre definido ese PLCode y de que el numero de cinta
+						sea menor o igual a cero.
+**********************************************************************************************************************************/
+int ifnGenNomAlternativo(	long int liSidCode,
+							long int liPLCode,
+							int iNumCinta,
+							char *szNomLlamadas,
+							char *szNomCargos,
+							char *szNomRechazos,
+							int iLLaConPath,
+							int iCarConPath,
+							int iRechConPath,
+							char cTipo)
+{
+	char szDirectorio[MAX_PATH];		/* DIRECTORIO DE TRABAJO */
+	char szDirLlam[MAX_PATH];			/* DIRECTORIO DE TRABAJO DE LLAMADAS */
+	char szDirCarg[MAX_PATH];			/* DIRECTORIO DE TRABAJO DE CARGOS */
+	char szWORK[MAX_PATH];				/* PREFIJO DEL DIRECTORIO DE TRABAJO */
+	long int liFechaManual;				/* FECHA DEL LOTE MANUAL */
+	char szTipoCinta[MAX_TIP_CINT];		/* TIPO DE CINTA SEGUN CONVENSION ROAMING AUTOMATICO */
+	char szRechazo[MAX_TIP_CINT];		/* TIPO DE CINTA SEGUN CONVENSION ROAMING AUTOMATICO */
+	char szErrores[MAX_ERRORES];		/* RETORNO DE LOS SP */
+	char szPath[MAX_TIP_CINT];			/* TEMPORAL PARA PODER EJECUTAR EL SP */
+	char szArchivo[MAX_PATH];			/* NOMBRE DEL ARCHIVO DE TRABAJO */
+	char szTipoDir[MAX_TIPO_DIR];
+	char szModulo[MAX_MODULO];
+	short sIndNullModulo;
+
+
+	/* VERIFICO LOS PARAMETROS */
+	if(iNumCinta<=0){
+		printf("Error en los parametros de la funcion ifnGenNomAlternativo\nEl numero de cinta debe ser mayor a cero\n");
+		return(ALT_PARAMETROS);
+	}
+
+	/* VERIFICO LOS PARAMETROS */
+	if(!szNomLlamadas && !szNomCargos){
+		printf("Error en los parametros de la funcion ifnGenNomAlternativo\nSe deben especificar los dos punteros de los nombres de los archivos.\n");
+		return(ALT_PARAMETROS);
+	}
+
+	if(!liPLCode) {
+		printf("Error en los parametros de la funcion ifnGenNomAlternativo\nDebe especificarse el PLCode\n");
+		return(ALT_PARAMETROS);
+	}
+
+	/* INICIALIZO LAS VARIABLES */
+	sIndNullModulo = TRUE;
+
+	memset(szDirectorio, 0, MAX_PATH);
+	memset(szDirLlam, 0, MAX_PATH);
+	memset(szDirCarg, 0, MAX_PATH);
+	memset(szWORK, 0, MAX_PATH);
+	memset(szPath, 0, MAX_TIP_CINT);
+	memset(szRechazo, 0, MAX_TIP_CINT);
+	memset(szModulo, 0, MAX_MODULO);
+	memset(szTipoDir, 0, MAX_TIPO_DIR);
+
+	if(cTipo == 'C') {
+		strcpy(szTipoDir, ROA_DIR_SALIDA);
+		szRechazo[0] = 'C';
+
+	} else if(cTipo == 'R') {
+		strcpy(szTipoDir, ROA_DIR_RECHAZOS);
+		szRechazo[0] = 'R';
+
+	} else if(cTipo == 'T') {
+		strcpy(szTipoDir, ROA_DIR_TRABAJO);
+		szRechazo[0] = 'C';
+
+	} else {
+		printf("Error en los parametros de la funcion ifnGenNomAlternativo\nDebe especificarse el el tipo de archivo a generar\n");
+		return(ALT_PARAMETROS);
+
+	}
+
+	/* ANTE UN ERROR */
+	/* NO HACE NADA Y RETORNA UN CODIGO DE ERROR */
+
+	/* SI SE REQUIERE ALGUN PATH */
+	if(iLLaConPath || iCarConPath || iRechConPath) {
+		/* DISPARO LA CONSULTA */
+		EXEC SQL
+			SELECT	dire.DIRE_DIRECTORIO,
+					CFVALUE
+			INTO	:szDirectorio,
+					:szWORK
+			FROM	MPDPLTAB bscs,
+					BS_TAS_DIRE_DIRECTORIO_ENTRADA dire,
+					MPSCFTAB
+			WHERE	bscs.PLCODE = :liPLCode
+			AND		bscs.SOURCE = dire.PLMN
+			AND		dire.DIRE_TIPO = :cTipo
+			AND		CFCODE = 17;
+		if(!sqlca.sqlerrd[2] || sqlca.sqlerrd[2] > 1) return(ALT_SQL);
+			/* NO SE ENCONTRO O DEVOLVIO MAS DE UNA FILA */
+
+		/* SACAR LOS CARACTERES DE LA DERECHA */
+		pcfnTrimR(szDirectorio);
+		pcfnTrimR(szWORK);
+
+		/* AGREGAR EL SLASH AL FINAL */
+		if(szWORK[strlen(szWORK) - 1] != '/') strcat(szWORK, "/");
+
+		/* CONCATENAR LOS DIRECTORIOS */
+		strcpy(szDirectorio, strcat(szWORK, szDirectorio));
+
+		/* CREAR EL DIRECTORIO SI NO EXISTE */
+		if(chdir(szDirectorio)) if(ifnCrearDir(szDirectorio)) return(ALT_PERMISOS);
+
+
+		/* AGREGAR EL SLASH AL FINAL */
+		if(szDirectorio[strlen(szDirectorio) - 1] != '/') strcat(szDirectorio, "/");
+
+		if(iLLaConPath) strcpy(szDirLlam, szDirectorio);
+		if(iCarConPath) strcpy(szDirCarg, szDirectorio);
+	}
+
+	/* OBTENGO EL CODIGO SID -SOLO PARA MANUAL- */
+	if(!liSidCode) {
+		EXEC SQL
+			SELECT	TO_NUMBER(BID_CODE)
+			INTO	:liSidCode
+			FROM	BILLING_IDENTIFIER
+			WHERE	BID_TYPE = 'S'
+			AND		PLCODE = :liPLCode
+			AND		ROWNUM < 2;
+		if(!sqlca.sqlerrd[2] || sqlca.sqlerrd[2] > 1) {
+			/* NO SE ENCONTRO O DEVOLVIO MAS DE UNA FILA */
+			return(ALT_SQL);
+		}
+	}
+
+
+	if(szNomLlamadas)
+	{
+		memset(szWORK, 0, MAX_TIP_CINT);
+		memset(szArchivo, 0, MAX_PATH);
+		memset(szErrores, 0, MAX_ERRORES);
+		strcpy(szTipoCinta, ROA_ALTERNATIVO);
+
+		/* DISPARO EL SP DE GENERACION DE NOMBRES DE ARCHIVOS DE ROAMING */
+		EXEC SQL EXECUTE
+			BEGIN
+				TP_ROA_ROAMING_AUT#.SP_ROA_GENERAR_NOMBRES(
+						:liPLCode,
+						:liSidCode,
+						:iNumCinta,
+						:szTipoCinta,
+						:szRechazo,
+						:szTipoDir,
+						0,
+						SYSDATE,
+						:szModulo INDICATOR :sIndNullModulo,
+						:szWORK,
+						:szPath,
+						:szArchivo,
+						:szErrores);
+			END;
+		END-EXEC;
+		pcfnTrimR(szErrores);
+		if(strlen(szErrores) > 0) return(ALT_SQL);
+
+		/* LIMPIO LAS VARIABLES */
+		pcfnTrimR(szArchivo);
+
+		if(iLLaConPath) strcpy(szNomLlamadas, szDirCarg);
+		else szNomLlamadas[0] = 0;
+		strcat(szNomLlamadas, szArchivo);
+	}
+
+
+
+	if(szNomCargos)
+	{
+		memset(szWORK, 0, MAX_PATH);
+		memset(szArchivo, 0, MAX_PATH);
+		memset(szErrores, 0, MAX_ERRORES);
+		strcpy(szTipoCinta, ROA_CARGOS);
+
+		/* DISPARO EL SP DE GENERACION DE NOMBRES DE ARCHIVOS DE ROAMING */
+		EXEC SQL EXECUTE
+			BEGIN
+				TP_ROA_ROAMING_AUT#.SP_ROA_GENERAR_NOMBRES(
+						:liPLCode,
+						:liSidCode,
+						:iNumCinta,
+						:szTipoCinta,
+						:szRechazo,
+						:szTipoDir,
+						0,
+						SYSDATE,
+						:szModulo INDICATOR :sIndNullModulo,
+						:szWORK,
+						:szPath,
+						:szArchivo,
+						:szErrores);
+			END;
+		END-EXEC;
+		pcfnTrimR(szErrores);
+		if(strlen(szErrores) > 0) return(ALT_SQL);
+
+		/* LIMPIO LAS VARIABLES */
+		pcfnTrimR(szArchivo);
+
+		/* INLUYE EL DIRECTORIO? */
+		if(iCarConPath) strcpy(szNomCargos, szDirLlam);
+		else szNomCargos[0] = 0;
+		strcat(szNomCargos, szArchivo);
+	}
+
+
+	szRechazo[0]='R';
+	if(szNomRechazos)
+	{
+		memset(szWORK, 0, MAX_PATH);
+		memset(szArchivo, 0, MAX_PATH);
+		memset(szErrores, 0, MAX_ERRORES);
+		strcpy(szTipoCinta, ROA_CIBER);
+
+		/* DISPARO EL SP DE GENERACION DE NOMBRES DE ARCHIVOS DE ROAMING */
+		EXEC SQL EXECUTE
+			BEGIN
+				TP_ROA_ROAMING_AUT#.SP_ROA_GENERAR_NOMBRES(
+						:liPLCode,
+						:liSidCode,
+						:iNumCinta,
+						:szTipoCinta,
+						:szRechazo,
+						:szTipoDir,
+						0,
+						SYSDATE,
+						:szModulo INDICATOR :sIndNullModulo,
+						:szWORK,
+						:szPath,
+						:szArchivo,
+						:szErrores);
+			END;
+		END-EXEC;
+		pcfnTrimR(szErrores);
+		if(strlen(szErrores) > 0) return(ALT_SQL);
+
+		/* LIMPIO LAS VARIABLES */
+		pcfnTrimR(szArchivo);
+
+		/* INLUYE EL DIRECTORIO? */
+		if(iRechConPath) strcpy(szNomRechazos, szDirLlam);
+		else szNomRechazos[0] = 0;
+		strcat(szNomRechazos, szArchivo);
+
+	}
+	return(ALT_SUCCESSFULL);
+
+}
+
+
+/**********************************************************************************************************************************
+Nombre Funcion:			ifnValidaRegAlternativo
+Argumentos:				Puntero a los datos del lote
+						Puntero de la estructura de llamadas,
+						Puntero de la estructura de cargos
+Valores que retorna:	ALT_SUCCESSFULL		--> TODO OK
+						ALT_ERRORES_REG		--> HAY ERRROES EN EL REGISTRO
+Descripcion:			Verifica el contenido del registro de llamadas y cargos.
+**********************************************************************************************************************************/
+int ifnValidaRegAlternativo(struct sLote *psDatosLote, struct sRLAlt *psRegLlamadasAlt, struct sRCAlt *psRegCargosAlt, struct sEAlt *psErroresAlt, struct sTarifas *pasTarifas[]) {
+
+	char szVigencia[MAX_FECHA + 10];	/* FECHA DE VIGENCIA */
+	long int liVigencia;				/* FECHA DE VIGENCIA */
+	long int liFecha;					/* FECHA DE LLAMADA/CARGO */
+	int iRetCode;						/* CODIGO DE RETORNO DE LAS FUNCIONES */
+	int iHora;							/* HORA PARA VALIDAR */
+	int iMinu;							/* MINUTOS PARA VALIDAR */
+	int iSegu;							/* SEGUNDOS PARA VALIDAR */
+	char szFechaAlt[MAX_FECHA + 10];	/* FECHA DE VIGENCIA */
+	char szMsjError[MAX_STR];			/* PARA LOS MENSAJES DE ERROR */
+
+
+	/* INCICIALIZO LAS VARIABLES */
+	vfnIniEstructuras(NULL, NULL, psErroresAlt);
+
+
+	sprintf(szVigencia, "%08ld", psDatosLote->liDiasAntig);
+	liVigencia = atol(szVigencia);
+
+	if(psRegLlamadasAlt) {
+		/* VALIDO QUE LA HORA SEA CORRECTA */
+		iHora = lifnAtoln(psRegLlamadasAlt->cHora, 2);
+		iMinu = lifnAtoln(psRegLlamadasAlt->cHora + 2, 2);
+		iSegu = lifnAtoln(psRegLlamadasAlt->cHora + 2, 2);
+		if((iHora < 0 || iHora > 23) ||
+		   (iMinu < 0 || iMinu > 59) ||
+		   (iSegu < 0 || iSegu > 59)) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_HORA, "La hora es incorrecta", FALSE);
+		}
+
+		/* VALIDO QUE LA FECHA SEA CORRECTA */
+		sprintf(szFechaAlt, "%ld", lifnAgregaSiglo(psRegLlamadasAlt->cFecha));
+		if(!ifnValidaFecha(szFechaAlt, "YYYYMMDD")) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_HORA, "La fecha es incorrecta", FALSE);
+		} else {
+			/* LE AGREGO EL SIGLO A LA FECHA */
+			liFecha = lifnAgregaSiglo(psRegLlamadasAlt->cFecha);
+			/* VERIFICO LA VIGENCIA */
+			if(liFecha < liVigencia) {
+				sprintf(szMsjError, "La llamada es antigua, Fecha=(%08ld) Vigencia=(%08ld)", liFecha, liVigencia);
+				ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_VIGENCIA, szMsjError, FALSE);
+			}
+
+			if(liFecha > psDatosLote->liFechaActual) {
+				sprintf(szMsjError, "La llamada es mas nueva, Fecha=(%08ld) Vigencia=(%08ld)", liFecha, liVigencia);
+				ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_VIGENCIA, szMsjError, FALSE);
+			}
+		}
+
+		/* VALIDO QUE LA DIRECCION SEA CORRECTA */
+		if(psRegLlamadasAlt->cFDire != ALT_DIREC_ENTRANTE &&
+		   psRegLlamadasAlt->cFDire != ALT_DIREC_SALIENTE) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_DIRECCION, "La direccion es incorrecta", FALSE);
+		}
+
+		/* VALIDO QUE LA DIRECCION SEA CORRECTA */
+		if(psRegLlamadasAlt->cFIddi != ALT_DIREC_DDI &&
+		   psRegLlamadasAlt->cFIddi != ALT_DIREC_DDN &&
+		   psRegLlamadasAlt->cFIddi != ALT_DIREC_LOCAL) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_DIRECCION, "La direccion internacional es incorrecta", FALSE);
+		}
+
+		/* VERIFICO EL IMPORTE DE AIRE */
+		if(psRegLlamadasAlt->liSegAire > 0 && psRegLlamadasAlt->dDurac <= 0) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_IMPORTE, "Error en el importe de aire", FALSE);
+		}
+
+		/* VERIFICO EL IMPORTE DE TIERRA - SIN IMPORTE */
+		if(psRegLlamadasAlt->liSegDura > 0 && psRegLlamadasAlt->dPulsos <= 0) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_IMPORTE, "Error en el importe de tierra", FALSE);
+		}
+
+		/* VERIFICO EL IMPORTE DE TIERRA - SIN DURACION */
+		if(psRegLlamadasAlt->liSegDura <= 0 && psRegLlamadasAlt->dPulsos > 0) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_DURACION, "Error en la duracion de tierra", FALSE);
+		}
+
+		/********************************/
+		/* VERIFICO LAS INCONSISTENCIAS */
+		/********************************/
+
+		/* INCONSISTENCIA EN LA DURACION DEL AIRE */
+		if(psRegLlamadasAlt->liSegDura > 0 && psRegLlamadasAlt->liSegAire <= 0) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_INCONS_1, "Error en la duracion del aire", FALSE);
+		}
+
+		if(psRegLlamadasAlt->cFDire == ALT_DIREC_ENTRANTE) {
+			/* INCONSISTENCIA EN LA DURACION DE LA TIERRA
+			if(psRegLlamadasAlt->liSegDura > 0 &&
+			   psRegLlamadasAlt->dPulsos > 0) {
+				ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_INCONS_2, "La tierra es incorrecta", FALSE);
+			}*/
+
+			/* INCONSISTENCIA EN EL DESTINO
+			if(strncmp(psRegLlamadasAlt->cNumMin, psRegLlamadasAlt->cNumDestino, strlen(psRegLlamadasAlt->cNumMin)) > 0) {
+				ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_INCONS_3, "El destino es incorrecto", FALSE);
+			}*/
+		}
+
+		/* VERIFICO EL IMPORTE DE INTERCAMBIO DE AIRE */
+		if(ifnVerifTarifaIntercambio(pasTarifas, psDatosLote->liPLCode, psDatosLote->liNumSID, psRegLlamadasAlt->liSegAire, psRegLlamadasAlt->dDurac, 0.) == ROA_SUCCESSFULL) {
+		} else {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_COTIZAC_INTERC, "La tasacion de la llamada no es correcta", FALSE);
+		}
+
+	}
+
+	if(psRegCargosAlt) {
+		/* VALIDO QUE LA FECHA SEA CORRECTA */
+		sprintf(szFechaAlt, "%ld", lifnAgregaSiglo(psRegCargosAlt->cFecha));
+		if(!ifnValidaFecha(szFechaAlt, "YYYYMMDD")) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_HORA, "La fecha del cargo es incorrecta", FALSE);
+		} else {
+			/* LE AGREGO EL SIGLO A LA FECHA */
+			liFecha = lifnAgregaSiglo(psRegCargosAlt->cFecha);
+			/* VERIFICO LA VIGENCIA */
+			if(liFecha < liVigencia) {
+				sprintf(szMsjError, "El cargo es antiguo, Fecha=(%08ld) Vigencia=(%08ld)", liFecha, liVigencia);
+				ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_VIGENCIA, szMsjError, FALSE);
+			}
+
+			if(liFecha > psDatosLote->liFechaActual) {
+				sprintf(szMsjError, "El cargo es mas nuevo, Fecha=(%08ld) Vigencia=(%08ld)", liFecha, liVigencia);
+				ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_VIGENCIA, szMsjError, FALSE);
+			}
+		}
+
+		/* VERIFICO EL IMPORTE */
+		if(psRegCargosAlt->dCargo <= 0) {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_IMPORTE, "El importe del cargo no es correcto", FALSE);
+		}
+
+		/* VERIFICO EL IMPORTE DE INTERCAMBIO DE CARGOS */
+		if(ifnVerifTarifaIntercambio(pasTarifas, psDatosLote->liPLCode, psDatosLote->liNumSID, 1L, 0., psRegCargosAlt->dCargo) == ROA_SUCCESSFULL) {
+		} else {
+			ifnAgregarErrorAlt(psErroresAlt, ALT_COD_ERR_COTIZAC_INTERC, "La tasacion del cargo no es correcto", FALSE);
+		}
+	}
+
+
+
+
+
+	if(psErroresAlt->liCantidadErrores > 0) {
+		return(ALT_ERRORES_REG);
+	} else {
+		return(ALT_SUCCESSFULL);
+	}
+
+}
+
+
+/**********************************************************************************************************************************
+Nombre Funcion:		vfnIniEstructuras
+Argumentos:			puntero a la estructura del registro de llamadas, cargos y errores de Alternativo
+Descripcion:		inicializa las estructuras
+**********************************************************************************************************************************/
+void vfnIniEstructuras(struct sRLAlt *psRegLlamadasAlt, struct sRCAlt *psRegCargosAlt, struct sEAlt *psErroresAlt) {
+
+	int t;				/* CONTADOR */
+
+	if(psRegLlamadasAlt) {
+		memset(psRegLlamadasAlt->cNumMin, 0, MAX_MIN);
+		memset(psRegLlamadasAlt->cFecha, 0, 7);
+		memset(psRegLlamadasAlt->cHora, 0, 7);
+		memset(psRegLlamadasAlt->cNumDestino, 0, 19);
+		memset(psRegLlamadasAlt->cDestino, 0, 21);
+		memset(psRegLlamadasAlt->szESN, 0, MAX_ESN);			/* ESN */
+		memset(psRegLlamadasAlt->szDN, 0, MAX_DN);				/* DN */
+		memset(psRegLlamadasAlt->szTipoPlan, 0, MAX_TIPO_PLAN);	/* PRE-PAGO, POST-PAGO Y MIX */
+		psRegLlamadasAlt->liSegAire = 0L;
+		psRegLlamadasAlt->liSegDura = 0L;
+		psRegLlamadasAlt->dPulsos = 0.;
+		psRegLlamadasAlt->dDurac = 0.;
+		psRegLlamadasAlt->dTAX = 0.;
+		psRegLlamadasAlt->cFDire = 0;
+		psRegLlamadasAlt->cFIddi = 0;
+		psRegLlamadasAlt->cFiller = 0;
+	}
+
+	if(psRegCargosAlt) {
+		memset(psRegCargosAlt->cNumMin, 0, MAX_MIN);
+		memset(psRegCargosAlt->cFecha, 0, 9);
+		memset(psRegCargosAlt->szESN, 0, MAX_ESN);				/* ESN */
+		memset(psRegCargosAlt->szDN, 0, MAX_DN);				/* DN */
+		memset(psRegCargosAlt->szTipoPlan, 0, MAX_TIPO_PLAN);	/* PRE-PAGO, POST-PAGO Y MIX */
+		psRegCargosAlt->dCargo = 0.;
+	}
+
+	if(psErroresAlt) {
+		psErroresAlt->liCantidadErrores = 0L;
+		psErroresAlt->iLoteCompleto = FALSE;
+		for(t=0;t<ALT_MAX_ERRORES;t++) {
+			psErroresAlt->alCodigos[t] = 0L;
+			memset(psErroresAlt->aszDesc[t], 0, MAX_STR);
+		}
+	}
+
+	return;
+
+
+}
+
+
+/***********************************************************************************************************************
+Nombre Funcion:			ifnGenEstructura
+Argumentos:				puntero a un string con el registro CIBER,
+						punteroa a estructuras de registros de cargos y llamadas de Alternativo
+Valores que retorna:	ALT_SUCCESSFULL --> PROCESO OK
+						ALT_PARAMETROS ---> LOS PARAMETROS NO SON CORRECTOS
+						ALT_ANTIGUA ------> LLAMADA VENCIDA
+Descripcion:			genera una estructura de registro Alternativo a partir de un registro CIBER
+Invocado por:			main
+Llamadas:				ninguna
+**********************************************************************************************************************/
+int ifnGenEstructura(char *cRegistro, struct sLote *psDatosLote, struct sRLAlt *psRegLlamadasAlt, struct sRCAlt *psRegCargosAlt) {
+
+	int iCodRet;
+
+	switch(lifnAtoln(cRegistro, 2)) {
+		case 10:
+			iCodRet = ifnGenLlamadas10_v2(cRegistro, psRegLlamadasAlt);
+			break;
+
+		case 20:
+			iCodRet = ifnGenLlamadas20_v2(cRegistro, psRegLlamadasAlt);
+			break;
+
+		case 22:
+			iCodRet = ifnGenLlamadas22_v2x(cRegistro, psRegLlamadasAlt);
+			break;
+
+		case 50:
+			iCodRet = ifnGenCargos50_v2(cRegistro, psRegCargosAlt);
+			break;
+
+		case 52:
+			iCodRet = ifnGenCargos52_v2x(cRegistro, psRegCargosAlt);
+			break;
+
+		default:
+			iCodRet = ALT_PARAMETROS;
+			break;
+	}
+
+	return(iCodRet);
+
+}
+
+
+/***********************************************************************************************************************
+Nombre Funcion:			ifnGenLlamada10_v2
+Argumentos:				puntero a un string con el registro CIBER tipo 10,
+						puntero a una estructura de registro de Alternativo
+Valores que retorna:	verdadero
+Descripcion:			genera una estructura de registro Alternativo a partir de un registro CIBER v2
+Invocado por:			main
+Llamadas:				ninguna
+**********************************************************************************************************************/
+int ifnGenLlamadas10_v2(char *cRegistro, struct sRLAlt *psRegLlamadasAlt) {
+
+	char szMinTmp[7];			/* MINUTOS EN FORMATO CIBER MMMMSS*/
+
+	if(psRegLlamadasAlt) {
+		/* INICIALIZO LAS VARIABLES */
+		vfnIniEstructuras(psRegLlamadasAlt, NULL, NULL);
+
+		/* LLENO LA ESTRUCTURA */
+		if(strncmp(15+cRegistro, "99", 2) == 0) {
+			memcpy(psRegLlamadasAlt->cNumMin, 17+cRegistro, 10);
+		} else {
+			memcpy(psRegLlamadasAlt->cNumMin, 15+cRegistro, 10);
+		}
+		memcpy(psRegLlamadasAlt->cFecha, 41+cRegistro, 6);
+
+		/* NO VA MAS */
+		/* psRegLlamadasAlt->dTAX = (double)lifnAtoln(cRegistro+63, 11) / 100.; */
+
+		memcpy(psRegLlamadasAlt->cHora, 136+cRegistro, 6);
+
+		szMinTmp[6]=0;
+		memcpy(szMinTmp, 142+cRegistro, 6);
+		psRegLlamadasAlt->liSegAire = lifnMinASeg(szMinTmp);
+
+		psRegLlamadasAlt->dDurac = (double)lifnAtoln(52+cRegistro, 11) / 100.;
+		memcpy(psRegLlamadasAlt->cNumDestino, 90+cRegistro, 15);
+		memcpy(psRegLlamadasAlt->cDestino, 234+cRegistro, 10);
+
+		if(cRegistro[85] == '2') {
+			psRegLlamadasAlt->cFDire = '1';
+		} else {
+			psRegLlamadasAlt->cFDire = '2';
+		}
+
+		if(strncmp(276+cRegistro, "18", 2) == 0) {
+			psRegLlamadasAlt->cFIddi = 'Y';
+		} else {
+			psRegLlamadasAlt->cFIddi = 'N';
+		}
+
+		memcpy(psRegLlamadasAlt->szESN, 30+cRegistro, 11);
+
+		/* ALINEO LAS VARIABLES */
+		pcfnPadR(psRegLlamadasAlt->cNumDestino, 18, ' ');
+		pcfnPadR(psRegLlamadasAlt->cDestino, 20, ' ');
+
+		return(ALT_SUCCESSFULL);
+	} else {
+		return(ALT_PARAMETROS);
+	}
+
+}
+
+
+/***********************************************************************************************************************
+Nombre Funcion:			ifnGenLlamada20_v2
+Argumentos:				puntero a un string con el registro CIBER tipo 20,
+						puntero a una estructura de registro de Alternativo
+Valores que retorna:	verdadero
+Descripcion:			genera una estructura de registro Alternativo a partir de un registro CIBER
+Invocado por:			main
+Llamadas:				ninguna
+**********************************************************************************************************************/
+int ifnGenLlamadas20_v2(char *cRegistro, struct sRLAlt *psRegLlamadasAlt) {
+
+	char szMinTmp[7];			/* MINUTOS EN FORMATO CIBER MMMMSS*/
+	double dTotalTierra;
+	double dTotal;
+
+	if(psRegLlamadasAlt) {
+		/* INICIALIZO LAS VARIABLES */
+		vfnIniEstructuras(psRegLlamadasAlt, NULL, NULL);
+
+		/* LLENO LA ESTRUCTURA */
+		if(strncmp(15+cRegistro, "99", 2) == 0) {
+			memcpy(psRegLlamadasAlt->cNumMin, 17+cRegistro, 10);
+		} else {
+			memcpy(psRegLlamadasAlt->cNumMin, 15+cRegistro, 10);
+		}
+		memcpy(psRegLlamadasAlt->cFecha, 41+cRegistro, 6);
+
+		/* NO VA MAS */
+		/* psRegLlamadasAlt->dTAX = (double)lifnAtoln(cRegistro+63, 11) / 100.; */
+
+		memcpy(psRegLlamadasAlt->cHora, 136+cRegistro, 6);
+
+		szMinTmp[6]=0;
+		memcpy(szMinTmp, 142+cRegistro, 6);
+		psRegLlamadasAlt->liSegAire = lifnMinASeg(szMinTmp);
+		szMinTmp[6]=0;
+		memcpy(szMinTmp, 264+cRegistro, 6);
+		psRegLlamadasAlt->liSegDura = lifnMinASeg(szMinTmp);
+
+
+		dTotalTierra = (double)lifnAtoln(288+cRegistro, 11) / 100.;
+		dTotalTierra += (double)lifnAtoln(299+cRegistro, 11) / 100.;
+		dTotalTierra += (double)lifnAtoln(310+cRegistro, 11) / 100.;
+		dTotal = (double)lifnAtoln(52+cRegistro, 11) / 100.;
+
+		psRegLlamadasAlt->dPulsos = dTotalTierra;
+		psRegLlamadasAlt->dDurac = dTotal - dTotalTierra;
+
+
+
+		memcpy(psRegLlamadasAlt->cNumDestino, 90+cRegistro, 15);
+		memcpy(psRegLlamadasAlt->cDestino, 234+cRegistro, 10);
+
+		if(cRegistro[85] == '2') {
+			psRegLlamadasAlt->cFDire = '1';
+		} else {
+			psRegLlamadasAlt->cFDire = '2';
+		}
+
+		if(strncmp(276+cRegistro, "18", 2) == 0) {
+			psRegLlamadasAlt->cFIddi = 'Y';
+		} else {
+			psRegLlamadasAlt->cFIddi = 'N';
+		}
+
+		/* ALINEO LAS VARIABLES */
+		pcfnPadR(psRegLlamadasAlt->cNumDestino, 18, ' ');
+		pcfnPadR(psRegLlamadasAlt->cDestino, 20, ' ');
+
+		return(ALT_SUCCESSFULL);
+	} else {
+		return(ALT_PARAMETROS);
+	}
+
+}
+
+
+/***********************************************************************************************************************
+Nombre Funcion:			ifnGenCargos50_v2
+Argumentos:				puntero a un string con el registro CIBER tipo 50,
+						puntero a una estructura de registro de cargos de Alternativo
+Valores que retorna:	verdadero
+Descripcion:			genera una estructura de registro de cargos de Alternativo a partir de un registro CIBER 50
+Invocado por:			main
+Llamadas:				ninguna
+**********************************************************************************************************************/
+int ifnGenCargos50_v2(char *cRegistro, struct sRCAlt *psRegCargosAlt) {
+
+	if(psRegCargosAlt) {
+		/* INICIALIZO LAS VARIABLES */
+		vfnIniEstructuras(NULL, psRegCargosAlt, NULL);
+
+		/* LLENO LA ESTRUCTURA */
+		if(strncmp(15+cRegistro, "99", 2) == 0) {
+			memcpy(psRegCargosAlt->cNumMin, 17+cRegistro, 10);
+		} else {
+			memcpy(psRegCargosAlt->cNumMin, 15+cRegistro, 10);
+		}
+		memcpy(psRegCargosAlt->cFecha, 41+cRegistro, 6);
+		psRegCargosAlt->dCargo = (double)lifnAtoln(52+cRegistro, 11) / 100.;
+
+		return(ALT_SUCCESSFULL);
+	} else {
+		return(ALT_PARAMETROS);
+	}
+
+}
+
+
+/***********************************************************************************************************************
+Nombre Funcion:			ifnGenLlamadas22_v2x
+Argumentos:				puntero a un string con el registro CIBER tipo 22
+						puntero a una estructura de registro de Alternativo
+Valores que retorna:	verdadero
+Descripcion:			genera una estructura de registro Alternativo a partir de un registro CIBER
+Invocado por:			main
+Llamadas:				ninguna
+**********************************************************************************************************************/
+int ifnGenLlamadas22_v2x(char *cRegistro, struct sRLAlt *psRegLlamadasAlt) {
+
+	char szMinTmp[7];			/* MINUTOS EN FORMATO CIBER MMMMSS*/
+	double dTotalTierra;
+	double dTotal;
+
+	if(psRegLlamadasAlt) {
+		/* INICIALIZO LAS VARIABLES */
+		vfnIniEstructuras(psRegLlamadasAlt, NULL, NULL);
+
+		/* LLENO LA ESTRUCTURA */
+		if(strncmp(14+cRegistro, "99", 2) == 0) {
+			memcpy(psRegLlamadasAlt->cNumMin, 16+cRegistro, 10);
+		} else {
+			memcpy(psRegLlamadasAlt->cNumMin, 14+cRegistro, 10);
+		}
+		memcpy(psRegLlamadasAlt->cFecha, 104+cRegistro, 6);
+
+		/* NO VA MAS */
+		/* psRegLlamadasAlt->dTAX = (double)lifnAtoln(cRegistro+82, 11) / 100.; */
+
+		memcpy(psRegLlamadasAlt->cHora, 212+cRegistro, 6);
+
+		szMinTmp[6]=0;
+		memcpy(szMinTmp, 218+cRegistro, 6);
+		psRegLlamadasAlt->liSegAire = lifnMinASeg(szMinTmp);
+		szMinTmp[6]=0;
+		memcpy(szMinTmp, 329+cRegistro, 6);
+		psRegLlamadasAlt->liSegDura = lifnMinASeg(szMinTmp);
+
+
+		dTotalTierra = (double)lifnAtoln(359+cRegistro, 11) / 1000.;
+		dTotalTierra += (double)lifnAtoln(370+cRegistro, 11) / 1000.;
+		dTotalTierra += (double)lifnAtoln(381+cRegistro, 11) / 1000.;
+		dTotal = (double)lifnAtoln(71+cRegistro, 11) / 1000.;
+
+		psRegLlamadasAlt->dPulsos = dTotalTierra;					/* TIERRA */
+		psRegLlamadasAlt->dDurac = dTotal - dTotalTierra;			/* AIRE */
+
+		memcpy(psRegLlamadasAlt->cNumDestino, 132+cRegistro, 15);
+		memcpy(psRegLlamadasAlt->cDestino, 293+cRegistro, 10);
+
+		if(cRegistro[110] == '2') {
+			psRegLlamadasAlt->cFDire = '1';
+		} else {
+			psRegLlamadasAlt->cFDire = '2';
+		}
+
+		if(strncmp(341+cRegistro, "18", 2) == 0) {
+			psRegLlamadasAlt->cFIddi = 'Y';
+		} else {
+			psRegLlamadasAlt->cFIddi = 'N';
+		}
+
+		memcpy(psRegLlamadasAlt->szDN, 31+cRegistro, lifnAtoln(29+cRegistro, 2));
+		memcpy(psRegLlamadasAlt->szESN, 47+cRegistro, 19);
+
+		/* ALINEO LAS VARIABLES */
+		pcfnPadR(psRegLlamadasAlt->cNumDestino, 18, ' ');
+		pcfnPadR(psRegLlamadasAlt->cDestino, 20, ' ');
+
+		return(ALT_SUCCESSFULL);
+	} else {
+		return(ALT_PARAMETROS);
+	}
+
+}
+
+
+/***********************************************************************************************************************
+Nombre Funcion:			ifnGenCargos52_v2x
+Argumentos:				puntero a un string con el registro CIBER tipo 52
+						puntero a una estructura de registro de cargos de Alternativo
+Valores que retorna:	verdadero
+Descripcion:			genera una estructura de registro de cargos de Alternativo a partir de un registro CIBER 50
+Invocado por:			main
+Llamadas:				ninguna
+**********************************************************************************************************************/
+int ifnGenCargos52_v2x(char *cRegistro, struct sRCAlt *psRegCargosAlt) {
+
+	if(psRegCargosAlt) {
+		/* INICIALIZO LAS VARIABLES */
+		vfnIniEstructuras(NULL, psRegCargosAlt, NULL);
+
+		/* LLENO LA ESTRUCTURA */
+		if(strncmp(14+cRegistro, "99", 2) == 0) {
+			memcpy(psRegCargosAlt->cNumMin, 16+cRegistro, 10);
+		} else {
+			memcpy(psRegCargosAlt->cNumMin, 14+cRegistro, 10);
+		}
+		memcpy(psRegCargosAlt->cFecha, 104+cRegistro, 6);
+		psRegCargosAlt->dCargo = (double)lifnAtoln(71+cRegistro, 11) / 1000.;
+
+		return(ALT_SUCCESSFULL);
+	} else {
+		return(ALT_PARAMETROS);
+	}
+
+}
+
+
+
+/***********************************************************************************************************************
+Nombre Funcion:			ifnAgregarErrorAlt
+Argumentos:				Estructura de errores de alternativo
+						Codigo de Error				Codigo de error a agregar
+						Descripcion					Descripcion opcional
+						Bandera de Lote Completo	Genera que el lote se rechaze entero, solo se activa.
+Valores que retorna:	ALT_SUCCESSFULL			Todo OK
+						ALT_MAX_ERRORES			No hay mas lugar para errores
+Descripcion:			Agrega un error en la lista de errores
+Invocado por:			ifnValidaRegAlternativo
+Llamadas:				ninguna
+**********************************************************************************************************************/
+int ifnAgregarErrorAlt(struct sEAlt *psErroresAlt, long lCodError, char *szDesccripcion, int iLoteCompleto) {
+
+	long lPosic;			/* POSICION EN EL ARREGLO DE ERRORES */
+
+	lPosic = psErroresAlt->liCantidadErrores;
+
+	/* INCREMENTO LA CANTIDAD DE ERRORES */
+	psErroresAlt->liCantidadErrores += 1L;
+
+	/* VERIFICO LA CANTIDAD DE ERRORES */
+	if(psErroresAlt->liCantidadErrores >= ALT_MAX_ERRORES) {
+		printf("No hay mas capacidad para los errores\n");
+		return(ALT_MAX_ERRORES);
+	}
+
+	/* GRABO EL ERROR */
+	psErroresAlt->alCodigos[lPosic] = lCodError;
+	if(strlen(szDesccripcion) >= MAX_STR) {
+		printf("No hay capacidad para el mensaje de error\n");
+		return(ALT_PARAMETROS);
+	} else {
+		strcpy(psErroresAlt->aszDesc[lPosic], szDesccripcion);
+	}
+
+	/* BANDERA DE LOTE COMPLETO */
+	if(iLoteCompleto) {
+		/* SOLO SE ACTIVA */
+		psErroresAlt->iLoteCompleto = TRUE;
+	}
+
+	return(ALT_SUCCESSFULL);
+
+}

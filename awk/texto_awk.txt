@@ -1,0 +1,13 @@
+%
+texto numero 1
+Esto es una prueba
+%
+Texto numero 2
+%
+Texto numero 3
+Esto es otra prueba
+prueba numero 3
+%
+Texto numero 4
+renglon 2
+%
