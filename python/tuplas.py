@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 # Las tuplas son lo mismo que las listas pero sus valores son inmutables, los valores no se pueden modificar
 # Son muchas mas ligeras que las listas

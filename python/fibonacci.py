@@ -1,4 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
 def fib(n):  # devuelve la serie fibonacci hasta n
     """Devuelve la serie fibonacci hasta n"""
     result = []

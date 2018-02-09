@@ -1,4 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
 def pedir_confirmacion(prompt, reintentos=4, queja='Si o no, por favor!'):
     while True:
         ok = raw_input(prompt)

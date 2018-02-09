@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 secuencia = ["Uno", "Dos", "Tres", "Cuatro"]
 for elemento in secuencia:

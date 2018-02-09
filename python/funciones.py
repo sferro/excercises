@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 def imprimir_holamundo(texto, veces = 1):
     print veces * texto

@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 def collatz(number):
     if (number % 2) == 0:

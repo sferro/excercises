@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 cadena = "hola mudno esto \nes una prueba. Cancion"
 print cadena

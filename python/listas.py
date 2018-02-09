@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 # Las listas vendrian a ser arrays
 # Pueden contener cualquier tipo de dato: enteros, Booleanos, flotantes, cadenas, otras listas
