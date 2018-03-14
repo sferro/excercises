@@ -6,7 +6,7 @@ import random
 secretNumber = random.randint(1, 1000)
 print('I am thinking of a number between 1 and 1000.')
 
-# Ask the player to guess 6 times.
+# Ask the player to guess 10 times.
 for guessesTaken in range(1, 10):
     print('Take a guess.')
     guess = int(input())
